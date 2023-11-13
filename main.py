@@ -5,6 +5,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import socket
 from datetime import datetime
+import threading
 
 
 def get_certificate_expiration(domain):
@@ -20,12 +21,36 @@ def get_certificate_expiration(domain):
         return e
 
 
+def process_domain(domain, row, worksheet, domain_column, current_time):
+    expiration_date = get_certificate_expiration(domain)
+
+    if isinstance(expiration_date, datetime):
+        days_until_expiration = (expiration_date - current_time).days
+
+        expiration_date_cell = worksheet.cell(row=row, column=domain_column + 1)
+        expiration_date_cell.value = expiration_date
+
+        if days_until_expiration < 30:
+            red_fill = openpyxl.styles.PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
+            expiration_date_cell.fill = red_fill
+    else:
+        error_message = str(expiration_date)
+        error_cell = worksheet.cell(row=row, column=domain_column + 1)
+        error_cell.value = error_message
+        error_fill = openpyxl.styles.PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
+        error_cell.fill = error_fill
+
+
 def main():
     # 打开Excel文件
     workbook = openpyxl.load_workbook('domains.xlsx')
 
     # 选择要操作的工作表
-    sheet = 'abc.com'
+    sheet = 'xisland.cn'
+    # sheet = 'sunriveryty.com'
+    # sheet = 'yymember.com'
+    # sheet = 'chinatopview.cn'
+    # sheet = 'sunriver.cn'
     worksheet = workbook[sheet]
 
     # 获取域名列表，假设域名列表从第1行开始（行索引从1开始）
@@ -35,33 +60,20 @@ def main():
     # 计算当前时间
     current_time = datetime.now()
 
+    threads = []
     # 循环遍历域名列表
     for row in range(start_row, worksheet.max_row + 1):
         domain_cell = worksheet.cell(row=row, column=domain_column)
         domain = domain_cell.value
         print(domain)
 
-        expiration_date = get_certificate_expiration(domain)
+        thread = threading.Thread(target=process_domain, args=(domain, row, worksheet, domain_column, current_time))
+        thread.start()
+        threads.append(thread)
 
-        if isinstance(expiration_date, datetime):
-            # 计算过期日期与当前日期之间的差距
-            days_until_expiration = (expiration_date - current_time).days
-
-            # 将过期日期写入Excel文件
-            expiration_date_cell = worksheet.cell(row=row, column=domain_column + 1)  # 在B列写入过期日期
-            expiration_date_cell.value = expiration_date
-
-            # 如果过期时间小于30天，将单元格标记为红色
-            if days_until_expiration < 30:
-                red_fill = openpyxl.styles.PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
-                expiration_date_cell.fill = red_fill
-        else:
-            # 标注错误信息并标记为红色
-            error_message = str(expiration_date)
-            error_cell = worksheet.cell(row=row, column=domain_column + 1)
-            error_cell.value = error_message
-            error_fill = openpyxl.styles.PatternFill(start_color="FFFF0000", end_color="FFFF0000", fill_type="solid")
-            error_cell.fill = error_fill
+    # 等待所有线程完成
+    for thread in threads:
+        thread.join()
 
     # 保存Excel文件
     results_file = f'{current_time.strftime("%Y-%m-%d_%H-%M-%S")}_{sheet}.xlsx'
