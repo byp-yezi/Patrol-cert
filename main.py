@@ -4,17 +4,22 @@ from openpyxl import workbook, load_workbook
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 
 
 def get_certificate_expiration(domain):
     try:
+        context = ssl.create_default_context()
         with socket.create_connection((domain, 443), timeout=3) as sock:
-            cert = ssl.get_server_certificate((domain, 443))
-            cert_bytes = cert.encode('utf-8')
-            cert_obj = x509.load_pem_x509_certificate(cert_bytes, default_backend())
-            expiration_date = cert_obj.not_valid_after
+            with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                cert = ssock.getpeercert(binary_form=True)
+                cert_obj = x509.load_der_x509_certificate(cert, default_backend())
+                expiration_date = cert_obj.not_valid_after.replace(tzinfo=timezone.utc)
+
+            # Add debug output
+            # print(f"Domain: {domain}, Expiration Date: {expiration_date}")
+
             return expiration_date
     except (ssl.CertificateError, socket.gaierror, socket.timeout, TimeoutError, ConnectionRefusedError,
             ConnectionResetError, OSError) as e:
@@ -25,6 +30,9 @@ def process_domain(domain, row, worksheet, domain_column, current_time):
     expiration_date = get_certificate_expiration(domain)
 
     if isinstance(expiration_date, datetime):
+        # 转换为不带时区信息的日期对象
+        expiration_date = expiration_date.replace(tzinfo=None)
+
         days_until_expiration = (expiration_date - current_time).days
 
         expiration_date_cell = worksheet.cell(row=row, column=domain_column + 1)
@@ -46,11 +54,7 @@ def main():
     workbook = openpyxl.load_workbook('domains.xlsx')
 
     # 选择要操作的工作表
-    sheet = 'xisland.cn'
-    # sheet = 'sunriveryty.com'
-    # sheet = 'yymember.com'
-    # sheet = 'chinatopview.cn'
-    # sheet = 'sunriver.cn'
+    sheet = 'Sheet1'
     worksheet = workbook[sheet]
 
     # 获取域名列表，假设域名列表从第1行开始（行索引从1开始）
@@ -58,7 +62,7 @@ def main():
     start_row = 1
 
     # 计算当前时间
-    current_time = datetime.now()
+    current_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
     threads = []
     # 循环遍历域名列表
@@ -76,7 +80,7 @@ def main():
         thread.join()
 
     # 保存Excel文件
-    results_file = f'{current_time.strftime("%Y-%m-%d_%H-%M-%S")}_{sheet}.xlsx'
+    results_file = f'{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_{sheet}.xlsx'
     workbook.save(results_file)
 
     # 打开已保存的工作簿并设置活动工作表
